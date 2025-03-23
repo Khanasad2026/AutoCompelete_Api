@@ -4,12 +4,12 @@ const fs = require('fs');
 class AutocompleteExtractor {
   constructor(baseUrl = 'http://35.200.185.69:8000') {
     this.baseUrl = baseUrl;
-    this.endpoint = '/v1/autocomplete';
+    this.endpoint = '/v3/autocomplete';
     this.paramName = 'query';
     this.discoveredNames = new Set();
     this.requestCount = 0;
     this.startTime = Date.now();
-    this.rateLimitDelay = 600;
+    this.rateLimitDelay = 750;
     this.retryDelay = 1000;
     this.maxRetries = 5;
   }
@@ -26,7 +26,6 @@ class AutocompleteExtractor {
     for (let attempt = 0; attempt < this.maxRetries; attempt++) {
       try {
         await this.delay(this.rateLimitDelay);
-        
         const response = await axios.get(url, { params });
         
         if (response.status === 429) {
@@ -57,14 +56,62 @@ class AutocompleteExtractor {
     throw new Error(`Failed to get response after ${this.maxRetries} attempts`);
   }
 
+  async testEndpoint() {
+    try {
+      console.log(`Testing endpoint: ${this.baseUrl}${this.endpoint}?${this.paramName}=a`);
+      const response = await this.makeRequest('a');
+      console.log(`Endpoint test successful. Status: ${response.status}`);
+      console.log(`Response data:`, response.data);
+      this.analyzeResponseStructure(response.data);
+      return true;
+    } catch (e) {
+      console.log(`Endpoint test failed: ${e.message}`);
+      return false;
+    }
+  }
+
+  analyzeResponseStructure(data) {
+    console.log(`\nAnalyzing response structure:`);
+    if (Array.isArray(data)) {
+      console.log(`- Response is an array with ${data.length} items`);
+      if (data.length > 0) {
+        console.log(`- First item: ${JSON.stringify(data[0])}`);
+      }
+    } else if (typeof data === 'object' && data !== null) {
+      console.log(`- Response is an object with keys: ${Object.keys(data).join(', ')}`);
+      const resultKeys = ['results', 'suggestions', 'completions', 'data', 'items'];
+      for (const key of resultKeys) {
+        if (data[key]) {
+          console.log(`- Found results in '${key}' field`);
+        }
+      }
+    } else {
+      console.log(`- Response is of type ${typeof data}`);
+    }
+    console.log();
+  }
+
+  extractResults(responseData) {
+    if (Array.isArray(responseData)) {
+      return responseData.map(item => typeof item === 'string' ? item : (item.name || item.value || item.text || item));
+    } else if (typeof responseData === 'object' && responseData !== null) {
+      const resultFields = ['results', 'suggestions', 'completions', 'data', 'items'];
+      for (const field of resultFields) {
+        if (responseData[field] && Array.isArray(responseData[field])) {
+          return responseData[field].map(item => typeof item === 'string' ? item : (item.name || item.value || item.text || item));
+        }
+      }
+      return Object.values(responseData);
+    }
+    return [];
+  }
+
   async extractAllNames() {
     console.log(`\n===== EXTRACTING NAMES =====`);
-    
     const queue = [];
     for (let i = 97; i <= 122; i++) {
       queue.push(String.fromCharCode(i));
     }
-    
     const visitedPrefixes = new Set(queue);
     
     while (queue.length > 0) {
@@ -74,12 +121,11 @@ class AutocompleteExtractor {
         const response = await this.makeRequest(prefix);
         
         if (response.status === 200) {
-          const results = response.data;
+          const results = this.extractResults(response.data);
           
           for (const name of results) {
             if (!this.discoveredNames.has(name)) {
               this.discoveredNames.add(name);
-              
               if (typeof name === 'string' && name.startsWith(prefix) && name.length > prefix.length) {
                 for (let i = 97; i <= 122; i++) {
                   const newPrefix = name.substring(0, prefix.length + 1);
@@ -91,11 +137,6 @@ class AutocompleteExtractor {
               }
             }
           }
-          
-          if (this.discoveredNames.size % 10 === 0) {
-            const elapsed = (Date.now() - this.startTime) / 1000;
-            console.log(`Found ${this.discoveredNames.size} names, made ${this.requestCount} requests (${(this.requestCount / elapsed).toFixed(2)} req/s)`);
-          }
         }
       } catch (e) {
         console.log(`Error processing prefix '${prefix}': ${e.message}`);
@@ -105,7 +146,7 @@ class AutocompleteExtractor {
     return this.discoveredNames;
   }
 
-  saveResults(filename = "extracted_namesv1.json") {
+  saveResults(filename = "extracted_namesv3.json") {
     fs.writeFileSync(
       filename, 
       JSON.stringify(Array.from(this.discoveredNames), null, 2)
@@ -125,9 +166,15 @@ class AutocompleteExtractor {
 
 async function main() {
   const extractor = new AutocompleteExtractor();
-  await extractor.extractAllNames();
-  extractor.saveResults();
-  extractor.printSummary();
+  const endpointWorks = await extractor.testEndpoint();
+  
+  if (endpointWorks) {
+    await extractor.extractAllNames();
+    extractor.saveResults();
+    extractor.printSummary();
+  } else {
+    console.log("Failed to access the autocomplete endpoint. Please check the URL and parameters.");
+  }
 }
 
 main().catch(error => {
