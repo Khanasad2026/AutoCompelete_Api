@@ -4,12 +4,12 @@ const fs = require('fs');
 class AutocompleteExtractor {
   constructor(baseUrl = 'http://35.200.185.69:8000') {
     this.baseUrl = baseUrl;
-    this.endpoint = '/v1/autocomplete';
+    this.endpoint = '/v2/autocomplete';
     this.paramName = 'query';
     this.discoveredNames = new Set();
     this.requestCount = 0;
     this.startTime = Date.now();
-    this.rateLimitDelay = 100; // Initial delay between requests (milliseconds)
+    this.rateLimitDelay = 1200; // Initial delay between requests (milliseconds)
     this.retryDelay = 1000; // Initial retry delay for rate limiting (milliseconds)
     this.maxRetries = 5; // Maximum number of retries for a request
   }
@@ -235,7 +235,7 @@ class AutocompleteExtractor {
     return this.discoveredNames;
   }
 
-  saveResults(filename = "extracted_names.json") {
+  saveResults(filename = "extracted_namesv2.json") {
     // Save the extracted names to a file
     fs.writeFileSync(
       filename, 
